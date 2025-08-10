@@ -97,6 +97,8 @@ def start_run(db: Session, wi: models.WorkItem) -> models.Run:
 def complete_run(db: Session, run: models.Run, success: bool = True) -> models.Run:
     run.status = "succeeded" if success else "failed"
     run.logs = (run.logs or "") + ("Completed successfully.\n" if success else "Failed.\n")
+    # mark finish time for duration metrics
+    run.finished_at = datetime.utcnow()
     db.add(run)
     # advance work item
     wi = run.work_item
@@ -128,26 +130,6 @@ def append_run_log(db: Session, run: models.Run, line: str) -> models.Run:
     db.add(run)
     db.commit()
     db.refresh(run)
-    # schedule retry with backoff and jitter if configured
-    if not success:
-        eff_max = wi.max_retries if wi.max_retries is not None else getattr(settings, "max_retries", 0)
-        if eff_max and eff_max > 0:
-            failures = db.query(models.Run).filter_by(work_item_id=wi.id, status="failed").count()
-            if failures <= eff_max:
-                base = wi.backoff_base_seconds if wi.backoff_base_seconds is not None else getattr(settings, "backoff_base_seconds", 30)
-                jitter = wi.backoff_jitter_seconds if wi.backoff_jitter_seconds is not None else 0
-                delay = base * (2 ** max(0, failures - 1))
-                if jitter and jitter > 0:
-                    delay += random.uniform(0, jitter)
-                st = models.ScheduledTask(
-                    work_item_id=wi.id,
-                    status="queued",
-                    priority=0,
-                    depends_on_work_item_id=None,
-                    scheduled_for=datetime.utcnow() + timedelta(seconds=int(delay)),
-                )
-                db.add(st)
-                db.commit()
     return run
 
 
@@ -425,3 +407,73 @@ def respond_info_request(db: Session, ir: models.InfoRequest, values: dict) -> m
     db.commit()
     db.refresh(ir)
     return ir
+
+
+def add_run_step(
+    db: Session,
+    run: models.Run,
+    name: str,
+    status: str = "succeeded",
+    duration_seconds: float | None = None,
+    started_at: datetime | None = None,
+    finished_at: datetime | None = None,
+) -> models.RunStep:
+    # compute next index
+    idx = (
+        db.query(models.RunStep)
+        .filter_by(run_id=run.id)
+        .count()
+    )
+    # infer duration if not provided but both times are present
+    dur = duration_seconds
+    if dur is None and started_at and finished_at:
+        try:
+            dur = (finished_at - started_at).total_seconds()
+        except Exception:
+            dur = None
+
+    step = models.RunStep(
+        run_id=run.id,
+        idx=idx,
+        name=name,
+        status=status,
+        duration_seconds=dur,
+        started_at=started_at or datetime.utcnow(),
+        finished_at=finished_at,
+    )
+    db.add(step)
+    db.commit()
+    db.refresh(step)
+    return step
+
+
+def list_run_steps(db: Session, run: models.Run) -> list[models.RunStep]:
+    return (
+        db.query(models.RunStep)
+        .filter_by(run_id=run.id)
+        .order_by(models.RunStep.idx.asc(), models.RunStep.id.asc())
+        .all()
+    )
+
+
+def get_run_step(db: Session, step_id: int) -> models.RunStep | None:
+    return db.get(models.RunStep, step_id)
+
+
+def update_run_step(
+    db: Session,
+    step: models.RunStep,
+    status: str | None = None,
+    duration_seconds: float | None = None,
+    finished_at: datetime | None = None,
+) -> models.RunStep:
+    if status is not None:
+        step.status = status
+    if duration_seconds is not None:
+        step.duration_seconds = duration_seconds
+    if finished_at is not None:
+        step.finished_at = finished_at
+    db.add(step)
+    db.commit()
+    db.refresh(step)
+    return step

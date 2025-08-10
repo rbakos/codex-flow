@@ -22,6 +22,11 @@ def create_project(payload: schemas.ProjectCreate, db: Session = Depends(get_db)
     return crud.create_project(db, name=payload.name, description=payload.description)
 
 
+@router.get("/", response_model=list[schemas.ProjectOut], summary="List projects")
+def list_projects(db: Session = Depends(get_db)):
+    return db.query(models.Project).order_by(models.Project.id.asc()).all()
+
+
 @router.post(
     "/{project_id}/vision",
     response_model=schemas.VisionOut,

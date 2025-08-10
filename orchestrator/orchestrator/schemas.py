@@ -1,5 +1,6 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 from typing import Optional
+from datetime import datetime
 
 
 class ProjectCreate(BaseModel):
@@ -65,6 +66,15 @@ class RunOut(BaseModel):
     status: str
     logs: str
     claimed_by: Optional[str] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+
+    @computed_field
+    @property
+    def duration_seconds(self) -> Optional[float]:  # type: ignore[override]
+        if self.started_at and self.finished_at:
+            return (self.finished_at - self.started_at).total_seconds()
+        return None
 
     class Config:
         orm_mode = True
@@ -167,6 +177,34 @@ class RequeueRunIn(BaseModel):
     delay_seconds: Optional[int] = None
     priority: Optional[int] = 0
     backoff: Optional[bool] = True
+
+
+class RunStepCreate(BaseModel):
+    name: str
+    status: Optional[str] = "succeeded"
+    duration_seconds: Optional[float] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+
+
+class RunStepOut(BaseModel):
+    id: int
+    run_id: int
+    idx: int
+    name: str
+    status: str
+    duration_seconds: Optional[float] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+
+    class Config:
+        orm_mode = True
+
+
+class RunStepUpdate(BaseModel):
+    status: Optional[str] = None
+    duration_seconds: Optional[float] = None
+    finished_at: Optional[datetime] = None
 
 
 class WorkItemPolicyUpdate(BaseModel):

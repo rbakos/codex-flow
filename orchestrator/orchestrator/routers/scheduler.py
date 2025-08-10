@@ -27,7 +27,15 @@ def enqueue(payload: schemas.EnqueueRequest, db: Session = Depends(get_db)):
     wi = crud.get_work_item(db, payload.work_item_id)
     if not wi:
         raise HTTPException(status_code=404, detail="Work item not found")
-    return crud.enqueue(db, wi, payload.depends_on_work_item_id, payload.priority or 0, payload.delay_seconds or 0)
+    st = crud.enqueue(db, wi, payload.depends_on_work_item_id, payload.priority or 0, payload.delay_seconds or 0)
+    return schemas.ScheduledTaskOut(
+        id=st.id,
+        work_item_id=st.work_item_id,
+        status=st.status,
+        depends_on_work_item_id=st.depends_on_work_item_id,
+        priority=st.priority,
+        scheduled_for=st.scheduled_for.isoformat() if getattr(st, "scheduled_for", None) else None,
+    )
 
 
 @router.post(
@@ -39,7 +47,15 @@ def requeue_work_item(payload: schemas.EnqueueRequest, db: Session = Depends(get
     wi = crud.get_work_item(db, payload.work_item_id)
     if not wi:
         raise HTTPException(status_code=404, detail="Work item not found")
-    return crud.enqueue(db, wi, payload.depends_on_work_item_id, payload.priority or 0, payload.delay_seconds or 0)
+    st = crud.enqueue(db, wi, payload.depends_on_work_item_id, payload.priority or 0, payload.delay_seconds or 0)
+    return schemas.ScheduledTaskOut(
+        id=st.id,
+        work_item_id=st.work_item_id,
+        status=st.status,
+        depends_on_work_item_id=st.depends_on_work_item_id,
+        priority=st.priority,
+        scheduled_for=st.scheduled_for.isoformat() if getattr(st, "scheduled_for", None) else None,
+    )
 
 
 @router.post(
@@ -57,7 +73,15 @@ def requeue_run(run_id: int, payload: schemas.RequeueRunIn | None = None, db: Se
         failures = db.query(crud.models.Run).filter_by(work_item_id=wi.id, status="failed").count()
         base = crud.settings.backoff_base_seconds
         delay = base * (2 ** max(0, failures))
-    return crud.enqueue(db, wi, None, (payload.priority if payload else 0) or 0, delay)
+    st = crud.enqueue(db, wi, None, (payload.priority if payload else 0) or 0, delay)
+    return schemas.ScheduledTaskOut(
+        id=st.id,
+        work_item_id=st.work_item_id,
+        status=st.status,
+        depends_on_work_item_id=st.depends_on_work_item_id,
+        priority=st.priority,
+        scheduled_for=st.scheduled_for.isoformat() if getattr(st, "scheduled_for", None) else None,
+    )
 
 
 @router.post("/tick", summary="Process scheduler tick")
@@ -68,4 +92,15 @@ def tick(db: Session = Depends(get_db)):
 
 @router.get("/queue", response_model=list[schemas.ScheduledTaskOut], summary="List scheduled tasks")
 def queue(db: Session = Depends(get_db)):
-    return crud.list_queue(db)
+    items = crud.list_queue(db)
+    return [
+        schemas.ScheduledTaskOut(
+            id=st.id,
+            work_item_id=st.work_item_id,
+            status=st.status,
+            depends_on_work_item_id=st.depends_on_work_item_id,
+            priority=st.priority,
+            scheduled_for=st.scheduled_for.isoformat() if getattr(st, "scheduled_for", None) else None,
+        )
+        for st in items
+    ]

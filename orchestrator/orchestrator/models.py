@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, Float
 from sqlalchemy.orm import relationship
 from datetime import datetime
 
@@ -71,6 +71,22 @@ class Run(Base):
     heartbeat_at = Column(DateTime, nullable=True)
 
     work_item = relationship("WorkItem", back_populates="runs")
+    # steps relationship added via RunStep
+
+
+class RunStep(Base):
+    __tablename__ = "run_steps"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(Integer, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False)
+    idx = Column(Integer, nullable=False, default=0)
+    name = Column(Text, nullable=False)
+    status = Column(String(32), default="succeeded")  # succeeded|failed|timeout|error
+    duration_seconds = Column(Float, nullable=True)
+    started_at = Column(DateTime, default=datetime.utcnow)
+    finished_at = Column(DateTime, nullable=True)
+
+    run = relationship("Run")
 
 
 class ApprovalRequest(Base):

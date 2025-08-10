@@ -194,6 +194,57 @@ def append_run_log(run_id: int, payload: schemas.LogAppend, db: Session = Depend
 
 
 @router.post(
+    "/runs/{run_id}/steps",
+    response_model=schemas.RunStepOut,
+    summary="Record a structured step event (name/status/duration)",
+)
+def post_run_step(run_id: int, payload: schemas.RunStepCreate, db: Session = Depends(get_db)):
+    run = crud.get_run(db, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    step = crud.add_run_step(
+        db,
+        run,
+        name=payload.name,
+        status=payload.status or "succeeded",
+        duration_seconds=payload.duration_seconds,
+        started_at=payload.started_at,
+        finished_at=payload.finished_at,
+    )
+    return step
+
+
+@router.get(
+    "/runs/{run_id}/steps",
+    response_model=list[schemas.RunStepOut],
+    summary="List structured step events for a run",
+)
+def get_run_steps(run_id: int, db: Session = Depends(get_db)):
+    run = crud.get_run(db, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return crud.list_run_steps(db, run)
+
+
+@router.patch(
+    "/runs/steps/{step_id}",
+    response_model=schemas.RunStepOut,
+    summary="Update a step (status/finished_at/duration)",
+)
+def patch_run_step(step_id: int, payload: schemas.RunStepUpdate, db: Session = Depends(get_db)):
+    step = crud.get_run_step(db, step_id)
+    if not step:
+        raise HTTPException(status_code=404, detail="Step not found")
+    return crud.update_run_step(
+        db,
+        step,
+        status=payload.status,
+        duration_seconds=payload.duration_seconds,
+        finished_at=payload.finished_at,
+    )
+
+
+@router.post(
     "/runs/{run_id}/info-requests",
     response_model=schemas.InfoRequestOut,
     summary="Create an info request for a run",

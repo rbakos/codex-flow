@@ -31,8 +31,18 @@
 
   // Projects
   async function refreshProjects() {
-    // no list projects endpoint; show a hint
-    $("projects").innerHTML = `<li>Use create + copy the returned project_id from responses below.</li>`;
+    try {
+      const items = await jget("/projects/");
+      if (!Array.isArray(items) || !items.length) {
+        $("projects").innerHTML = `<li>No projects yet</li>`;
+        return;
+      }
+      $("projects").innerHTML = items
+        .map((p) => `<li>${p.id}: ${p.name} — ${p.description || ""}</li>`) 
+        .join("");
+    } catch (e) {
+      $("projects").innerHTML = `<li>Failed to load projects</li>`;
+    }
   }
   $("refreshProjects").onclick = refreshProjects;
   $("createProject").onclick = async () => {
@@ -91,6 +101,28 @@
       $("logs").textContent += ev.data + "\n";
     };
     ws.onerror = () => alert("WebSocket error");
+  };
+  $("runDetail").onclick = async () => {
+    const runId = parseInt($("runId").value, 10);
+    const d = await jget(`/observability/runs/${runId}`);
+    const steps = (d.steps || []);
+    const max = Math.max(1, ...steps.map((s) => (s.duration_seconds || 0)));
+    const bars = steps.map((s) => {
+      const w = Math.max(1, Math.round(((s.duration_seconds || 0) / max) * 30));
+      return `${s.idx}. ${s.name} [${s.status}] ${(s.duration_seconds ?? 0).toFixed(3)}s\n[${"#".repeat(w)}${".".repeat(30 - w)}]`;
+    }).join("\n");
+    $("runDetailView").textContent = JSON.stringify(d.run, null, 2) + "\n\nSteps:\n" + bars;
+  };
+
+  $("loadMetrics").onclick = async () => {
+    const m = await jget("/observability/metrics");
+    const hist = m.runs_duration_histogram || {};
+    const max = Math.max(1, ...Object.values(hist));
+    const lines = Object.entries(hist).map(([k, v]) => {
+      const w = Math.max(1, Math.round((v / max) * 30));
+      return `${k.padEnd(6)} ${String(v).padStart(3)}  [${"#".repeat(w)}${".".repeat(30 - w)}]`;
+    }).join("\n");
+    $("metricsView").textContent = `Projects: ${m.projects}\nWork items: ${m.work_items}\nRuns: ${m.runs}\nAvg duration: ${m.runs_avg_duration_seconds ?? "n/a"}\n\nHistogram:\n${lines}`;
   };
 
   // Scheduler
