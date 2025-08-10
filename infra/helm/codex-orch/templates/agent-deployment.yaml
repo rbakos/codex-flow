@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: {{ .Values.agent.replicas }}
+  selector:
+    matchLabels: { app: agent }
+  template:
+    metadata:
+      labels: { app: agent }
+    spec:
+      containers:
+        - name: runner
+          image: {{ .Values.agent.image }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ORCH_URL
+              value: http://orchestrator.{{ .Values.namespace }}.svc.cluster.local:8000
+            - name: AGENT_INTERVAL
+              value: {{ .Values.agent.intervals.agent | quote }}
+            - name: AGENT_TICK_INTERVAL
+              value: {{ .Values.agent.intervals.tick | quote }}
+            - name: AGENT_HEARTBEAT_INTERVAL
+              value: {{ .Values.agent.intervals.heartbeat | quote }}
+            - name: AGENT_CLAIM_TTL
+              value: {{ .Values.agent.claimTtl | quote }}
+            - name: AGENT_ID
+              valueFrom:
+                fieldRef: { fieldPath: metadata.name }
+          readinessProbe:
+            exec: { command: ["/bin/sh", "-c", "echo ok"] }
+          livenessProbe:
+            exec: { command: ["/bin/sh", "-c", "echo ok"] }
+

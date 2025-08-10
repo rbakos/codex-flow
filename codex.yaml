@@ -1,0 +1,43 @@
+version: 1
+env:
+  BASE_URL: http://localhost:18080
+  ORCH_URL: http://localhost:18080
+  # Optional: share secret key for decrypting Info Requests when needed
+  # AGENT_SECRET_KEY: ""
+pipeline:
+  # Bring up the stack (Postgres + orchestrator)
+  - name: up
+    command: make codex-up
+
+  # Start a local agent (runs in foreground). For CI, prefer containerized agent or a second job.
+  - name: agent
+    command: make codex-agent
+
+  # Run one of the demos (AWS by default). Replace with codex-demo-gcp / codex-demo-azure as desired.
+  - name: demo
+    command: make codex-demo-aws
+
+  # Run tests locally via venv (optional)
+  - name: test
+    command: make codex-test
+
+  # Teardown (optional, useful in CI)
+  - name: down
+    command: make down || true
+
+tasks:
+  codex-up:
+    command: make codex-up
+  codex-agent:
+    command: make codex-agent
+  codex-demo-aws:
+    command: make codex-demo-aws
+  codex-demo-gcp:
+    command: make codex-demo-gcp
+  codex-demo-azure:
+    command: make codex-demo-azure
+  codex-test:
+    command: make codex-test
+  codex-down:
+    command: make down
+

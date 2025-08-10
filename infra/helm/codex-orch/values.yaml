@@ -1,0 +1,21 @@
+namespace: codex-orch
+
+orchestrator:
+  image: your-repo/orchestrator:latest
+  replicas: 1
+  schedulerBackgroundInterval: 1.0
+  requireApproval: true
+  rateLimitPerMin: 1000
+  env:
+    databaseUrl: postgresql+psycopg2://postgres:postgres@postgres:5432/orchestrator
+    secretKey: ""
+
+agent:
+  image: your-repo/orchestrator-agent:latest
+  replicas: 2
+  intervals:
+    agent: 2.0
+    tick: 1.0
+    heartbeat: 10.0
+  claimTtl: 300
+

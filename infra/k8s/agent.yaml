@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent
+  namespace: codex-orch
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: agent }
+  template:
+    metadata:
+      labels: { app: agent }
+    spec:
+      containers:
+        - name: runner
+          image: your-repo/orchestrator-agent:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ORCH_URL
+              value: http://orchestrator.codex-orch.svc.cluster.local:8000
+            - name: AGENT_INTERVAL
+              value: "2.0"
+            - name: AGENT_TICK_INTERVAL
+              value: "1.0"
+            - name: AGENT_HEARTBEAT_INTERVAL
+              value: "10.0"
+            - name: AGENT_CLAIM_TTL
+              value: "300"
+            - name: AGENT_ID
+              valueFrom:
+                fieldRef: { fieldPath: metadata.name }
+          readinessProbe:
+            exec: { command: ["/bin/sh", "-c", "echo ok"] }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec: { command: ["/bin/sh", "-c", "echo ok"] }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+

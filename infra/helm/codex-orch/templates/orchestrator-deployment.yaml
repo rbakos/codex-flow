@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orchestrator
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: {{ .Values.orchestrator.replicas }}
+  selector:
+    matchLabels: { app: orchestrator }
+  template:
+    metadata:
+      labels: { app: orchestrator }
+    spec:
+      containers:
+        - name: api
+          image: {{ .Values.orchestrator.image }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ORCH_DATABASE_URL
+              value: {{ .Values.orchestrator.env.databaseUrl | quote }}
+            - name: ORCH_REQUIRE_APPROVAL
+              value: {{ .Values.orchestrator.requireApproval | quote }}
+            - name: ORCH_RATE_LIMIT_PER_MIN
+              value: {{ .Values.orchestrator.rateLimitPerMin | quote }}
+            - name: ORCH_SCHEDULER_BACKGROUND_INTERVAL
+              value: {{ .Values.orchestrator.schedulerBackgroundInterval | quote }}
+            {{- if .Values.orchestrator.env.secretKey }}
+            - name: ORCH_SECRET_KEY
+              value: {{ .Values.orchestrator.env.secretKey | quote }}
+            {{- end }}
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet: { path: /observability/health, port: 8000 }
+          livenessProbe:
+            httpGet: { path: /observability/health, port: 8000 }
+

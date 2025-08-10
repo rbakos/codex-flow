@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Codex Orchestrator UI</title>
+    <link rel="stylesheet" href="/ui/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Codex Orchestrator</h1>
+      <div class="env">
+        <label>Base URL</label>
+        <input id="baseUrl" />
+        <button id="saveBase">Save</button>
+        <span id="status"></span>
+      </div>
+    </header>
+
+    <main>
+      <section>
+        <h2>Projects</h2>
+        <div class="controls">
+          <input id="projName" placeholder="name" />
+          <input id="projDesc" placeholder="description" />
+          <button id="createProject">Create</button>
+          <button id="refreshProjects">Refresh</button>
+        </div>
+        <ul id="projects"></ul>
+      </section>
+
+      <section>
+        <h2>Work Items</h2>
+        <div class="controls">
+          <input id="wiProjectId" placeholder="project_id" />
+          <input id="wiTitle" placeholder="title" />
+          <input id="wiDesc" placeholder="description" />
+          <button id="createWI">Create</button>
+        </div>
+        <div class="controls">
+          <input id="wiId" placeholder="work_item_id" />
+          <button id="requestApproval">Request Approval</button>
+          <input id="approvalId" placeholder="approval_id" />
+          <button id="approve">Approve</button>
+        </div>
+        <div class="controls">
+          <button id="startRun">Start Run</button>
+          <input id="runId" placeholder="run_id" />
+          <button id="completeRun">Complete Run</button>
+        </div>
+        <div class="controls">
+          <button id="listRuns">List Runs</button>
+          <button id="getLogs">Get Logs</button>
+          <button id="streamLogs">Stream Logs</button>
+        </div>
+        <pre id="runs"></pre>
+        <pre id="logs"></pre>
+      </section>
+
+      <section>
+        <h2>Scheduler</h2>
+        <div class="controls">
+          <input id="enqId" placeholder="work_item_id" />
+          <input id="depId" placeholder="depends_on_work_item_id (optional)" />
+          <input id="prio" placeholder="priority (0)" />
+          <input id="delay" placeholder="delay_seconds (0)" />
+          <button id="enqueue">Enqueue</button>
+          <button id="tick">Tick</button>
+          <button id="queue">List Queue</button>
+        </div>
+        <pre id="queueView"></pre>
+        <div class="controls">
+          <input id="rqWiId" placeholder="requeue work_item_id" />
+          <input id="rqPrio" placeholder="priority (0)" />
+          <input id="rqDelay" placeholder="delay_seconds (0)" />
+          <button id="requeueWI">Requeue Work Item</button>
+        </div>
+        <div class="controls">
+          <input id="rqRunId" placeholder="requeue run_id" />
+          <input id="rqRunPrio" placeholder="priority (0)" />
+          <label><input type="checkbox" id="rqBackoff" checked /> backoff</label>
+          <input id="rqRunDelay" placeholder="delay_seconds (opt)" />
+          <button id="requeueRun">Requeue Run</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Info Requests</h2>
+        <div class="controls">
+          <input id="irRunId" placeholder="run_id" />
+          <button id="listIR">List</button>
+        </div>
+        <div class="controls">
+          <input id="irReqId" placeholder="request_id" />
+          <textarea id="irValues" placeholder='{"KEY":"VALUE"}'></textarea>
+          <button id="respondIR">Respond</button>
+        </div>
+        <pre id="irView"></pre>
+      </section>
+    </main>
+
+    <script src="/ui/app.js"></script>
+  </body>
+  </html>

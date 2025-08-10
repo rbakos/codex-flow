@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic
+psycopg2-binary
+httpx
+pytest
+pytest-asyncio
+pydantic-settings
+requests
+black
+ruff
+PyYAML
+cryptography

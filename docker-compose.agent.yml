@@ -1,0 +1,13 @@
+version: "3.9"
+services:
+  agent:
+    build:
+      context: .
+      dockerfile: agents/runner/Dockerfile
+    environment:
+      ORCH_URL: http://orchestrator:8000
+      AGENT_INTERVAL: 1.0
+      AGENT_TICK_INTERVAL: 1.0
+    depends_on:
+      orchestrator:
+        condition: service_started
