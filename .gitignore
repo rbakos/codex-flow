@@ -1,0 +1,95 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Examples - Don't push example applications to GitHub
+examples/
+Examples/
+
+# Specifically exclude the FlowScribe app
+examples/wispr_flow_clone/
+
+# Logs
+*.log
+logs/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Docker
+docker-compose.override.yml
+
+# Temporary files
+*.tmp
+temp/
+tmp/
+
+# Build artifacts
+*.o
+*.a
+*.lib
+*.dll
+*.dylib
+*.exe
+*.out
+*.app
+
+# Xcode
+*.xcworkspace
+xcuserdata/
+DerivedData/
+*.xcuserstate
+
+# Swift/Xcode specific
+.build/
+Packages/
+Package.resolved
+*.xcodeproj/project.xcworkspace/
+*.xcodeproj/xcuserdata/

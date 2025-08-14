@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, Float
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, Float, JSON
 from sqlalchemy.orm import relationship
 from datetime import datetime
 
@@ -150,3 +150,31 @@ class UsageQuota(Base):
     window_start = Column(DateTime, default=datetime.utcnow)
 
     project = relationship("Project")
+
+
+class RunArtifact(Base):
+    __tablename__ = "run_artifacts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(Integer, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(300), nullable=False)
+    media_type = Column(String(128), nullable=True)
+    kind = Column(String(32), default="file")  # file|summary|report
+    size_bytes = Column(Integer, default=0)
+    content_base64 = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    run = relationship("Run")
+
+
+class RunSummary(Base):
+    __tablename__ = "run_summaries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(Integer, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String(300), nullable=True)
+    tags = Column(JSON, nullable=True)  # list of strings
+    data = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    run = relationship("Run")

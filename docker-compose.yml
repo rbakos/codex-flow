@@ -16,6 +16,11 @@ services:
       dockerfile: orchestrator/Dockerfile
     environment:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/orchestrator
+      # Optional OpenAI planner
+      ORCH_ENABLE_OPENAI_PLANNER: ${ORCH_ENABLE_OPENAI_PLANNER:-false}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ORCH_OPENAI_MODEL: ${ORCH_OPENAI_MODEL:-gpt-4o-mini}
+      ORCH_OPENAI_BASE_URL: ${ORCH_OPENAI_BASE_URL:-}
     ports:
       - "18080:8000"
     depends_on:

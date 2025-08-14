@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 
 from . import models
 from .config import settings
+from .planner import propose_requirements_from_openai
 import yaml
 import uuid
 import json
@@ -35,8 +36,8 @@ def create_vision(db: Session, project: models.Project, content: str) -> models.
 
 
 def propose_requirements(db: Session, vision: models.Vision) -> models.RequirementsDraft:
-    # Simple deterministic draft for now; pluggable planner later
-    body = (
+    # Try OpenAI-backed planner if enabled, otherwise fall back to deterministic draft.
+    body = propose_requirements_from_openai(vision.project.name, vision.content) or (
         f"Proposed Requirements for project '{vision.project.name}':\n"
         f"- Goals: derive from vision text.\n"
         f"- MVP: implement minimal endpoints and CI.\n"
@@ -477,3 +478,77 @@ def update_run_step(
     db.commit()
     db.refresh(step)
     return step
+
+
+def add_run_artifact(
+    db: Session,
+    run: models.Run,
+    name: str,
+    media_type: str | None,
+    kind: str | None,
+    content_base64: str,
+) -> models.RunArtifact:
+    from base64 import b64decode
+
+    size = 0
+    try:
+        size = len(b64decode(content_base64))
+    except Exception:
+        size = 0
+    art = models.RunArtifact(
+        run_id=run.id,
+        name=name,
+        media_type=media_type,
+        kind=(kind or "file"),
+        size_bytes=size,
+        content_base64=content_base64,
+    )
+    db.add(art)
+    db.commit()
+    db.refresh(art)
+    return art
+
+
+def list_run_artifacts(db: Session, run: models.Run) -> list[models.RunArtifact]:
+    return (
+        db.query(models.RunArtifact)
+        .filter_by(run_id=run.id)
+        .order_by(models.RunArtifact.id.asc())
+        .all()
+    )
+
+
+def get_run_artifact(db: Session, artifact_id: int) -> models.RunArtifact | None:
+    return db.get(models.RunArtifact, artifact_id)
+
+
+def add_run_summary(db: Session, run: models.Run, data: dict) -> models.RunSummary:
+    title = None
+    tags = None
+    try:
+        if isinstance(data, dict):
+            title = data.get("title") if isinstance(data.get("title"), str) else None
+            t = data.get("tags") or data.get("labels")
+            if isinstance(t, list):
+                tags = [x for x in t if isinstance(x, str)] or None
+    except Exception:
+        title = None
+        tags = None
+    row = models.RunSummary(run_id=run.id, title=title, tags=tags, data=data)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def list_run_summaries(db: Session, run: models.Run) -> list[models.RunSummary]:
+    return (
+        db.query(models.RunSummary)
+        .filter_by(run_id=run.id)
+        .order_by(models.RunSummary.id.asc())
+        .all()
+    )
+
+
+def get_run_summary(db: Session, summary_id: int) -> models.RunSummary | None:
+    return db.get(models.RunSummary, summary_id)

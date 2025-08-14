@@ -1,5 +1,5 @@
 from pydantic import BaseModel, computed_field
-from typing import Optional
+from typing import Optional, Any
 from datetime import datetime
 
 
@@ -222,3 +222,39 @@ class QuotaOut(BaseModel):
     max_runs_per_day: int
     runs_today: int
     window_start: str
+
+
+class ArtifactCreate(BaseModel):
+    name: str
+    media_type: str | None = None
+    kind: str | None = None  # file|summary|report
+    content_base64: str
+
+
+class ArtifactOut(BaseModel):
+    id: int
+    run_id: int
+    name: str
+    media_type: str | None = None
+    kind: str
+    size_bytes: int
+    created_at: str
+
+    class Config:
+        orm_mode = True
+
+
+class SummaryCreate(BaseModel):
+    data: dict[str, Any]
+
+
+class SummaryOut(BaseModel):
+    id: int
+    run_id: int
+    title: Optional[str] = None
+    tags: Optional[list[str]] = None
+    created_at: str
+    data: Optional[dict[str, Any]] = None
+
+    class Config:
+        orm_mode = True

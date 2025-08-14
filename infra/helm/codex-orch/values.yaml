@@ -9,6 +9,11 @@ orchestrator:
   env:
     databaseUrl: postgresql+psycopg2://postgres:postgres@postgres:5432/orchestrator
     secretKey: ""
+    openai:
+      enabled: false
+      apiKey: ""
+      model: gpt-4o-mini
+      baseUrl: ""
 
 agent:
   image: your-repo/orchestrator-agent:latest
@@ -18,4 +23,3 @@ agent:
     tick: 1.0
     heartbeat: 10.0
   claimTtl: 300
-

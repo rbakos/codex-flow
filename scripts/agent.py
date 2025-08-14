@@ -20,6 +20,11 @@ TICK_INTERVAL = float(os.getenv("AGENT_TICK_INTERVAL", "1.0"))
 HEARTBEAT_INTERVAL = float(os.getenv("AGENT_HEARTBEAT_INTERVAL", "10.0"))
 CLAIM_TTL = int(os.getenv("AGENT_CLAIM_TTL", "300"))
 AGENT_ID = os.getenv("AGENT_ID", f"agent-{uuid.uuid4().hex[:8]}")
+ENABLE_LLM_PLANNING = os.getenv("AGENT_ENABLE_LLM_PLANNING", "false").lower() in ("1", "true", "yes")
+ALLOW_OPENAI_FALLBACK = os.getenv("AGENT_ALLOW_OPENAI_FALLBACK", "false").lower() in ("1", "true", "yes")
+CODEX_PLAN_CMD = os.getenv("CODEX_PLAN_CMD")  # defaults to Codex CLI exec if not set
+AGENT_EXECUTOR = os.getenv("AGENT_EXECUTOR", "builtin")  # builtin|codex
+MOCK_CODEX = os.getenv("AGENT_MOCK_CODEX", "false").lower() in ("1", "true", "yes")
 
 
 def tick() -> int:
@@ -229,6 +234,254 @@ def infer_steps_from_title(title: str) -> List[str]:
     return steps
 
 
+def _llm_generate_with_codex_cli(prompt: str) -> Optional[str]:
+    """
+    Invoke Codex CLI (or any CLI) via a configurable command to generate text from a prompt.
+    Expected: command reads prompt from stdin and returns plain text to stdout.
+    Configure with env CODEX_PLAN_CMD, e.g. "codex ask --model gpt-4o-mini".
+    """
+    cmd = CODEX_PLAN_CMD
+    # Provide a sensible default that requires no approvals and is read-only.
+    if not cmd:
+        cmd = "codex exec --full-auto"
+    try:
+        proc = subprocess.run(
+            cmd,
+            input=prompt,
+            text=True,
+            shell=True,
+            executable=SHELL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=60,
+        )
+        if proc.returncode != 0:
+            return None
+        return (proc.stdout or "").strip()
+    except Exception:
+        return None
+
+
+def _llm_generate_with_openai(prompt: str) -> Optional[str]:
+    """
+    Optional fallback to OpenAI if allowed by env. Uses the same model/base URL
+    variables as orchestrator for consistency.
+    """
+    if not ALLOW_OPENAI_FALLBACK:
+        return None
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+    model = os.getenv("ORCH_OPENAI_MODEL", "gpt-4o-mini")
+    base_url = os.getenv("ORCH_OPENAI_BASE_URL")
+    try:
+        from openai import OpenAI  # type: ignore
+
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "Return only valid JSON. No commentary."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+        )
+        return (resp.choices[0].message.content or "").strip()
+    except Exception:
+        # Legacy fallback
+        try:
+            import openai  # type: ignore
+
+            if base_url:
+                try:
+                    openai.api_base = base_url  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+            openai.api_key = api_key  # type: ignore[attr-defined]
+            resp = openai.ChatCompletion.create(  # type: ignore[attr-defined]
+                model=model,
+                messages=[
+                    {"role": "system", "content": "Return only valid JSON. No commentary."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.2,
+            )
+            return (resp["choices"][0]["message"]["content"] or "").strip()
+        except Exception:
+            return None
+
+
+def plan_steps_with_llm(title: str, tool_recipe_yaml: Optional[str], existing_steps: Optional[List[Union[str, dict]]]) -> Optional[List[Union[str, dict]]]:
+    """
+    Use LLM to produce or refine steps. Prefers Codex CLI if configured; optionally falls back to OpenAI.
+    Expected output: JSON array of step items: string or {"run": str, "env"?: {}, "timeout"?: int, "cwd"?: str}
+    """
+    if not ENABLE_LLM_PLANNING:
+        return None
+    prompt = (
+        "Given a work item title and optional tool-recipe YAML, output a JSON array of execution steps. "
+        "Each element must be either a string command, or an object with keys: run (string), and optional env (object), "
+        "timeout (integer seconds), cwd (string). Use shell-friendly one-liners. Do not include explanations.\n\n"
+        f"Title: {title}\n\n"
+        f"ToolRecipe (YAML):\n{tool_recipe_yaml or '(none)'}\n\n"
+        f"Existing steps (JSON):\n{json.dumps(existing_steps or [], ensure_ascii=False)}\n\n"
+        "Return only JSON."
+    )
+    txt = _llm_generate_with_codex_cli(prompt)
+    if txt is None:
+        txt = _llm_generate_with_openai(prompt)
+    if not txt:
+        return None
+    try:
+        obj = json.loads(txt)
+        if isinstance(obj, list):
+            return obj
+    except Exception:
+        return None
+    return None
+
+
+def delegate_to_codex_full_auto(wi: dict, yaml_text: Optional[str], run_id: int) -> bool:
+    """
+    Delegate execution to Codex CLI in full-autonomy mode with workspace-write and network enabled.
+    Streams Codex stdout to orchestrator logs. Success determined by process exit code == 0.
+    """
+    title = (wi or {}).get("title", "")
+    description = (wi or {}).get("description", "")
+    prompt = (
+        "You are Codex running inside a container with workspace access."
+        " Take full autonomy to accomplish this task end-to-end."
+        " You may write files in the current repo, run tests, and use the network."
+        " Keep changes focused on the task. Provide progress logs.\n\n"
+        f"Work Item Title: {title}\n"
+        f"Description: {description}\n\n"
+        f"ToolRecipe (optional YAML):\n{yaml_text or '(none)'}\n\n"
+        "Goals:\n"
+        "- Implement the task efficiently.\n"
+        "- Run applicable tests or validations.\n"
+        "- Summarize what changed and why at the end.\n"
+    )
+    # Mock mode for CI/offline testing without Codex auth/token
+    if MOCK_CODEX:
+        append_log(run_id, "Agent: mock Codex execution enabled; simulating run")
+        # Simulate some work and write artifacts/summary
+        try:
+            import time, pathlib, json as _json
+            append_log(run_id, "Agent: [mock] planning")
+            time.sleep(0.2)
+            append_log(run_id, "Agent: [mock] executing")
+            time.sleep(0.2)
+            # produce artifacts
+            artifacts_dir = os.getenv("ARTIFACTS_DIR", "./artifacts")
+            p = pathlib.Path(artifacts_dir)
+            p.mkdir(parents=True, exist_ok=True)
+            (p / "result.txt").write_text("mock output\n")
+            summary = {
+                "title": f"Completed: {title}",
+                "tags": ["mock", "codex"],
+                "details": {"work_item_title": title, "description": description},
+            }
+            (p / "summary.json").write_text(_json.dumps(summary))
+            collect_and_upload_artifacts(run_id)
+            append_log(run_id, "Agent: [mock] done")
+            return True
+        except Exception as e:
+            append_log(run_id, f"Agent: mock Codex error: {e}")
+            return False
+
+    cmd = os.getenv("CODEX_EXEC_CMD", "codex exec --full-auto")
+    append_log(run_id, f"Agent: delegating to Codex -> {cmd}")
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            shell=True,
+            executable=SHELL,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        assert proc.stdin is not None and proc.stdout is not None
+        proc.stdin.write(prompt)
+        proc.stdin.flush()
+        proc.stdin.close()
+        while True:
+            line = proc.stdout.readline()
+            if line:
+                append_log(run_id, line.rstrip())
+            if proc.poll() is not None:
+                break
+        rc = proc.returncode or 0
+        append_log(run_id, f"Agent: Codex exited with code {rc}")
+        try:
+            collect_and_upload_artifacts(run_id)
+        except Exception as e:
+            append_log(run_id, f"Agent: artifact upload error: {e}")
+        return rc == 0
+    except Exception as e:
+        append_log(run_id, f"Agent: Codex delegation error: {e}")
+        return False
+
+
+def collect_and_upload_artifacts(run_id: int):
+    """
+    Collect artifacts from ARTIFACTS_DIR (default ./artifacts) and upload to orchestrator.
+    Limits: AGENT_ARTIFACTS_MAX_BYTES per file (default 1 MiB), AGENT_ARTIFACTS_MAX_FILES (default 20).
+    Special case: if summary.json exists, upload with kind=summary and media_type=application/json.
+    """
+    import pathlib, base64, mimetypes
+
+    artifacts_dir = os.getenv("ARTIFACTS_DIR", "./artifacts")
+    max_bytes = int(os.getenv("AGENT_ARTIFACTS_MAX_BYTES", str(1 * 1024 * 1024)))
+    max_files = int(os.getenv("AGENT_ARTIFACTS_MAX_FILES", "20"))
+    p = pathlib.Path(artifacts_dir)
+    if not p.exists() or not p.is_dir():
+        return
+    files = [x for x in p.glob("**/*") if x.is_file()]
+    # Prioritize summary.json at root
+    files.sort(key=lambda x: (0 if x.name == "summary.json" and x.parent.resolve() == p.resolve() else 1, str(x)))
+    sent = 0
+    for f in files:
+        if sent >= max_files:
+            break
+        try:
+            data = f.read_bytes()
+        except Exception:
+            continue
+        if len(data) > max_bytes:
+            data = data[:max_bytes]
+        b64 = base64.b64encode(data).decode("utf-8")
+        mt, _ = mimetypes.guess_type(str(f))
+        kind = "summary" if f.name == "summary.json" else "file"
+        try:
+            requests.post(
+                f"{BASE_URL}/work-items/runs/{run_id}/artifacts",
+                json={
+                    "name": str(f.relative_to(p)),
+                    "media_type": mt or ("application/json" if f.suffix == ".json" else None),
+                    "kind": kind,
+                    "content_base64": b64,
+                },
+                headers={"content-type": "application/json"},
+            )
+            if kind == "summary":
+                try:
+                    import json as _json
+
+                    parsed = _json.loads(data.decode("utf-8"))
+                    if isinstance(parsed, dict):
+                        requests.post(
+                            f"{BASE_URL}/work-items/runs/{run_id}/summary",
+                            json={"data": parsed},
+                            headers={"content-type": "application/json"},
+                        )
+                except Exception:
+                    pass
+            sent += 1
+        except Exception:
+            pass
+
+
 def main():
     print("Agent running against:", BASE_URL)
     print("Agent id:", AGENT_ID)
@@ -318,6 +571,29 @@ def main():
                         wi = get_work_item(wi_id)
                         title = (wi or {}).get("title", "")
                         steps = infer_steps_from_title(title)
+
+                # Optional Codex full-autonomy executor
+                if AGENT_EXECUTOR.lower() == "codex":
+                    wi = wi or get_work_item(wi_id) or {}
+                    yaml_text = locals().get("yaml_text") if 'yaml_text' in locals() else get_tool_recipe_yaml(wi_id)
+                    ok = delegate_to_codex_full_auto(wi, yaml_text, rid)
+                    append_log(rid, "Agent: finishing (codex executor)")
+                    complete(rid, success=ok)
+                    hb_stop.set(); hb_t.join(timeout=2.0)
+                    continue
+
+                # Optional LLM planning/refinement using Codex CLI or OpenAI fallback
+                if ENABLE_LLM_PLANNING:
+                    try:
+                        wi = wi or get_work_item(wi_id) or {}
+                        title = (wi or {}).get("title", "")
+                        yaml_text = yaml_text if 'yaml_text' in locals() else get_tool_recipe_yaml(wi_id)
+                        planned = plan_steps_with_llm(title, yaml_text, steps)
+                        if planned and isinstance(planned, list) and planned:
+                            steps = planned
+                            append_log(rid, "Agent: steps planned via LLM")
+                    except Exception as e:
+                        append_log(rid, f"Agent: LLM planning error: {e}")
 
                 # Plan capabilities and required inputs
                 wi = get_work_item(wi_id) or {}

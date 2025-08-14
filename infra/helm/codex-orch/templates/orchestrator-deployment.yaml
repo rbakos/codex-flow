@@ -28,10 +28,24 @@ spec:
             - name: ORCH_SECRET_KEY
               value: {{ .Values.orchestrator.env.secretKey | quote }}
             {{- end }}
+            # Optional OpenAI-backed planner
+            - name: ORCH_ENABLE_OPENAI_PLANNER
+              value: {{ .Values.orchestrator.env.openai.enabled | quote }}
+            {{- if .Values.orchestrator.env.openai.apiKey }}
+            - name: OPENAI_API_KEY
+              value: {{ .Values.orchestrator.env.openai.apiKey | quote }}
+            {{- end }}
+            {{- if .Values.orchestrator.env.openai.model }}
+            - name: ORCH_OPENAI_MODEL
+              value: {{ .Values.orchestrator.env.openai.model | quote }}
+            {{- end }}
+            {{- if .Values.orchestrator.env.openai.baseUrl }}
+            - name: ORCH_OPENAI_BASE_URL
+              value: {{ .Values.orchestrator.env.openai.baseUrl | quote }}
+            {{- end }}
           ports:
             - containerPort: 8000
           readinessProbe:
             httpGet: { path: /observability/health, port: 8000 }
           livenessProbe:
             httpGet: { path: /observability/health, port: 8000 }
-

@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     scheduler_background_interval: float = 0.0  # seconds; 0 disables
     max_retries: int = 2
     backoff_base_seconds: int = 30
+    # Optional OpenAI-backed requirements planner
+    enable_openai_planner: bool = False
+    openai_model: str = "gpt-4o-mini"
+    openai_base_url: str | None = None
 
     class Config:
         env_prefix = "ORCH_"

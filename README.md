@@ -52,7 +52,7 @@ The orchestrator models the control plane for autonomous build, test, and deploy
 
 - Project: top-level scope for a delivery effort.
 - Vision: high-level intent; used to derive requirements (stubbed deterministic draft).
-- RequirementsDraft: proposed/approved requirements for the current vision.
+- RequirementsDraft: proposed/approved requirements for the current vision. Optionally generated via OpenAI when enabled.
 - WorkItem: unit of work to build/test/deploy something; holds runs and a tool recipe.
 - Run: execution instance of a work item; produces logs and a `trace_id`.
 - ApprovalRequest: guardrail to gate risky actions (e.g., production deploy).
@@ -67,6 +67,48 @@ Flow overview:
 5) You fetch logs/traces and mark runs complete to unlock dependent tasks.
 
 OpenAPI docs: `http://localhost:18080/docs` (after `docker compose up`).
+
+## Optional: OpenAI‑Backed Requirements Planner
+By default, requirements drafts are produced deterministically. You can enable an OpenAI‑powered draft generator:
+
+- Set env vars and rebuild/start:
+
+  - `ORCH_ENABLE_OPENAI_PLANNER=true`
+  - `OPENAI_API_KEY=...`
+  - Optional overrides: `ORCH_OPENAI_MODEL` (default `gpt-4o-mini`), `ORCH_OPENAI_BASE_URL` (for proxies/self-hosted endpoints)
+
+- Docker Compose example:
+
+```bash
+export OPENAI_API_KEY=sk-...
+export ORCH_ENABLE_OPENAI_PLANNER=true
+docker compose up --build
+```
+
+- Helm chart values:
+
+```yaml
+orchestrator:
+  env:
+    openai:
+      enabled: true
+      apiKey: "${OPENAI_API_KEY}"
+      model: gpt-4o-mini
+      baseUrl: ""
+```
+
+If the planner is disabled, the API continues to return a simple requirements draft.
+
+## Agent LLM Planning via Codex CLI (Optional)
+The agent can delegate step planning to Codex CLI (or any CLI you configure) to infer/refine the `steps` for a run.
+
+- Enable with env:
+  - `AGENT_ENABLE_LLM_PLANNING=true`
+  - Default command: `codex exec --ask-for-approval never --sandbox read-only`
+  - Or set `CODEX_PLAN_CMD` explicitly, e.g., `codex exec -m gpt-4o-mini --ask-for-approval never --sandbox read-only`.
+  - The command must read the prompt from stdin and print the model output to stdout.
+- Output contract: model must return a JSON array of steps (strings or objects with keys `run`, optional `env`, `timeout`, `cwd`).
+- Fallbacks: if the CLI is not configured or fails, the agent falls back to deterministic inference; optionally allow OpenAI fallback with `AGENT_ALLOW_OPENAI_FALLBACK=true` and `OPENAI_API_KEY`.
 
 ## Tool Recipe (YAML)
 Validated schema (MVP):

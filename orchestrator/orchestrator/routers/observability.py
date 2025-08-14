@@ -178,3 +178,60 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
             for s in steps
         ],
     }
+
+
+@router.get(
+    "/summaries",
+    summary="Search run summaries",
+    description=(
+        "Returns indexable summaries across runs. Filter by project_id, work_item_id, tag, and title substring. "
+        "Use include_data to include the full JSON payload."
+    ),
+)
+def summaries(
+    db: Session = Depends(get_db),
+    project_id: int | None = None,
+    work_item_id: int | None = None,
+    tag: str | None = None,
+    title_substr: str | None = None,
+    include_data: bool = False,
+    limit: int = 100,
+    offset: int = 0,
+):
+    q = db.query(models.RunSummary, models.Run, models.WorkItem).join(
+        models.Run, models.RunSummary.run_id == models.Run.id
+    ).join(models.WorkItem, models.Run.work_item_id == models.WorkItem.id)
+    if work_item_id:
+        q = q.filter(models.WorkItem.id == work_item_id)
+    if project_id:
+        q = q.filter(models.WorkItem.project_id == project_id)
+    rows = (
+        q.order_by(models.RunSummary.id.desc())
+        .offset(max(0, offset))
+        .limit(max(1, min(1000, limit)))
+        .all()
+    )
+
+    out = []
+    for summary, run, wi in rows:
+        # Python-side filters for tag/title to keep DB portability simple
+        if tag:
+            tags = summary.tags or []
+            if not any(isinstance(t, str) and t.lower() == tag.lower() for t in tags):
+                continue
+        if title_substr and summary.title:
+            if title_substr.lower() not in summary.title.lower():
+                continue
+        item = {
+            "summary_id": summary.id,
+            "run_id": run.id,
+            "work_item_id": wi.id,
+            "project_id": wi.project_id,
+            "title": summary.title,
+            "tags": summary.tags,
+            "created_at": summary.created_at.isoformat(),
+        }
+        if include_data:
+            item["data"] = summary.data
+        out.append(item)
+    return out

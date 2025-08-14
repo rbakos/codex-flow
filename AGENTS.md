@@ -46,6 +46,47 @@
 - Convenience: `make up` / `make down` to manage stack; `make seed` to create sample data.
  - Config: `.env` with `ORCH_DATABASE_URL`, `ORCH_REQUIRE_APPROVAL`, `ORCH_CORS_ORIGINS`, `ORCH_RATE_LIMIT_PER_MIN`.
 
+## Agent: Optional LLM Planning via Codex CLI
+The agent can optionally use an LLM to plan/augment step execution. To avoid direct provider coupling,
+the agent prefers invoking the Codex CLI (or any CLI) you configure, passing the prompt via stdin and
+capturing the response from stdout.
+
+- Enable feature: set `AGENT_ENABLE_LLM_PLANNING=true` in the agent environment.
+- Configure CLI command with `CODEX_PLAN_CMD` or rely on the default:
+  - Default: `codex exec --ask-for-approval never --sandbox read-only`
+  - Or specify: `CODEX_PLAN_CMD="codex exec -m gpt-4o-mini --ask-for-approval never --sandbox read-only"`
+  - The command must read the prompt from stdin and print the raw model output to stdout.
+- Output contract: the model must return a JSON array of steps, where each element is either a string command or an object:
+  - `{ "run": "echo build", "env": {"KEY":"VAL"}, "timeout": 30, "cwd": "./dir" }`
+
+Fallbacks
+- If `CODEX_PLAN_CMD` is not set or the CLI invocation fails, the agent uses its deterministic inference.
+- You can optionally allow a direct OpenAI fallback by setting `AGENT_ALLOW_OPENAI_FALLBACK=true` and `OPENAI_API_KEY`.
+  - Optional: `ORCH_OPENAI_MODEL` (default `gpt-4o-mini`), `ORCH_OPENAI_BASE_URL`.
+
+Notes
+- The agent updates the run with structured step events and logs as usual.
+- LLM planning is a refinement step; if the model output is invalid JSON or empty, the agent falls back automatically.
+
+## Agent: Full-Autonomy Executor via Codex
+In addition to using Codex for planning, you can delegate the entire execution of a work item to Codex CLI.
+
+- Enable by setting `AGENT_EXECUTOR=codex`. The agent will:
+  - Claim a run and start a heartbeat.
+  - Launch `codex exec --ask-for-approval never --sandbox workspace-write` and feed it a prompt with the Work Item title/description and optional ToolRecipe.
+  - Stream Codex output to run logs and mark the run succeeded/failed based on the process exit code.
+
+- Containerized defaults:
+  - The agent image includes Codex CLI and a default `~/.codex/config.toml` enabling network in workspace-write:
+    -
+    ```toml
+    [sandbox_workspace_write]
+    network_access = true
+    ```
+  - If you prefer usage-based billing, set `OPENAI_API_KEY` in the container env. Otherwise run `codex login` interactively and copy `~/.codex/auth.json` as described in Codex README for headless setups.
+
+- Compose overlay (`docker-compose.agent.yml`) sets `AGENT_EXECUTOR=codex` by default so Codex runs in full autonomy inside the container.
+
 ## Coding Style & Naming Conventions
 - Formatting: enforce tool defaults (no bikeshedding). Use Prettier (TS/JS/MD), Black (Python), `gofmt` (Go).
 - Linting: ESLint + TypeScript strict, Ruff for Python, `staticcheck`/`golangci-lint` for Go.

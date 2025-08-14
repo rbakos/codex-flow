@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(chmod:*)",
+      "Bash(./create_xcode_project.sh:*)",
+      "Bash(mv:*)",
+      "Bash(cp:*)",
+      "Bash(xcodebuild:*)",
+      "Bash(rm:*)",
+      "Bash(swiftc:*)",
+      "Bash(mkdir:*)",
+      "Bash(./build/FlowScribe)",
+      "Bash(/dev/null)",
+      "Bash(open:*)"
+    ],
+    "defaultMode": "acceptEdits"
+  }
+}

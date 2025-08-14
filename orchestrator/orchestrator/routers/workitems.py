@@ -1,5 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
+from fastapi.responses import Response as FastAPIResponse
+from base64 import b64decode
+import json as _json
 from sqlalchemy.orm import Session
 
 from ..db import SessionLocal, Base, engine
@@ -366,6 +369,146 @@ def set_work_item_policy(
     db.commit()
     db.refresh(wi)
     return wi
+
+
+@router.post(
+    "/runs/{run_id}/artifacts",
+    response_model=schemas.ArtifactOut,
+    summary="Upload an artifact for a run",
+)
+def post_run_artifact(run_id: int, payload: schemas.ArtifactCreate, db: Session = Depends(get_db)):
+    run = crud.get_run(db, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    art = crud.add_run_artifact(
+        db,
+        run,
+        name=payload.name,
+        media_type=payload.media_type,
+        kind=payload.kind,
+        content_base64=payload.content_base64,
+    )
+    # If summary JSON, also index it into run_summaries
+    try:
+        if (payload.kind or "") == "summary" and (payload.media_type or "").endswith("json"):
+            data = _json.loads(b64decode(payload.content_base64).decode("utf-8"))
+            if isinstance(data, dict):
+                crud.add_run_summary(db, run, data)
+    except Exception:
+        pass
+    return schemas.ArtifactOut(
+        id=art.id,
+        run_id=art.run_id,
+        name=art.name,
+        media_type=art.media_type,
+        kind=art.kind,
+        size_bytes=art.size_bytes,
+        created_at=art.created_at.isoformat(),
+    )
+
+
+@router.get(
+    "/runs/{run_id}/artifacts",
+    response_model=list[schemas.ArtifactOut],
+    summary="List artifacts for a run",
+)
+def list_run_artifacts(run_id: int, db: Session = Depends(get_db)):
+    run = crud.get_run(db, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    items = crud.list_run_artifacts(db, run)
+    return [
+        schemas.ArtifactOut(
+            id=a.id,
+            run_id=a.run_id,
+            name=a.name,
+            media_type=a.media_type,
+            kind=a.kind,
+            size_bytes=a.size_bytes,
+            created_at=a.created_at.isoformat(),
+        )
+        for a in items
+    ]
+
+
+@router.get(
+    "/runs/artifacts/{artifact_id}",
+    response_model=schemas.ArtifactOut,
+    summary="Get artifact metadata",
+)
+def get_artifact(artifact_id: int, db: Session = Depends(get_db)):
+    a = crud.get_run_artifact(db, artifact_id)
+    if not a:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    return schemas.ArtifactOut(
+        id=a.id,
+        run_id=a.run_id,
+        name=a.name,
+        media_type=a.media_type,
+        kind=a.kind,
+        size_bytes=a.size_bytes,
+        created_at=a.created_at.isoformat(),
+    )
+
+
+@router.get(
+    "/runs/artifacts/{artifact_id}/raw",
+    summary="Download raw artifact contents",
+)
+def get_artifact_raw(artifact_id: int, db: Session = Depends(get_db)):
+    a = crud.get_run_artifact(db, artifact_id)
+    if not a:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    try:
+        data = b64decode(a.content_base64)
+    except Exception:
+        data = (a.content_base64 or "").encode("utf-8")
+    return FastAPIResponse(content=data, media_type=a.media_type or "application/octet-stream")
+
+
+@router.post(
+    "/runs/{run_id}/summary",
+    response_model=schemas.SummaryOut,
+    summary="Create or append a run summary (indexable JSON)",
+)
+def post_run_summary(run_id: int, payload: schemas.SummaryCreate, db: Session = Depends(get_db)):
+    run = crud.get_run(db, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    row = crud.add_run_summary(db, run, payload.data)
+    return schemas.SummaryOut(
+        id=row.id,
+        run_id=row.run_id,
+        title=row.title,
+        tags=row.tags,
+        created_at=row.created_at.isoformat(),
+        data=row.data,
+    )
+
+
+@router.get(
+    "/runs/{run_id}/summaries",
+    response_model=list[schemas.SummaryOut],
+    summary="List run summaries",
+)
+def list_run_summaries(run_id: int, db: Session = Depends(get_db), include_data: bool = True):
+    run = crud.get_run(db, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    rows = crud.list_run_summaries(db, run)
+    out = []
+    for r in rows:
+        out.append(
+            schemas.SummaryOut(
+                id=r.id,
+                run_id=r.run_id,
+                title=r.title,
+                tags=r.tags,
+                created_at=r.created_at.isoformat(),
+                data=(r.data if include_data else None),
+            )
+        )
+    return out
 
 
 @router.websocket("/runs/{run_id}/logs/ws")

@@ -32,6 +32,20 @@ spec:
               value: "1000"
             - name: ORCH_SCHEDULER_BACKGROUND_INTERVAL
               value: "1.0"
+            # Optional OpenAI-backed planner
+            - name: ORCH_ENABLE_OPENAI_PLANNER
+              value: "false"
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: orch-openai
+                  key: api_key
+                  optional: true
+            - name: ORCH_OPENAI_MODEL
+              value: "gpt-4o-mini"
+            # Optional base URL for self-hosted/proxied endpoints
+            - name: ORCH_OPENAI_BASE_URL
+              value: ""
           ports:
             - containerPort: 8000
           readinessProbe:
@@ -64,3 +78,13 @@ type: Opaque
 stringData:
   database_url: postgresql+psycopg2://postgres:postgres@postgres:5432/orchestrator
 
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: orch-openai
+  namespace: codex-orch
+type: Opaque
+stringData:
+  # Populate with your OpenAI API key
+  api_key: ""

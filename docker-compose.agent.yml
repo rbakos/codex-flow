@@ -8,6 +8,15 @@ services:
       ORCH_URL: http://orchestrator:8000
       AGENT_INTERVAL: 1.0
       AGENT_TICK_INTERVAL: 1.0
+      # Enable Codex-driven full autonomy in container
+      AGENT_EXECUTOR: codex
+      AGENT_ENABLE_LLM_PLANNING: "true"
+      CODEX_EXEC_CMD: codex exec --full-auto
+      CODEX_PLAN_CMD: codex exec -m gpt-4o-mini --full-auto
+      # Provide API key if using usage-based billing; otherwise "codex login" inside container
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # Disable mock to use real Codex execution
+      AGENT_MOCK_CODEX: "false"
     depends_on:
       orchestrator:
         condition: service_started
