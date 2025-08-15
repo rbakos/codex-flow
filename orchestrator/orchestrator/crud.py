@@ -9,18 +9,31 @@ import json
 from datetime import datetime, timedelta
 import random
 from .crypto_utils import encrypt_text
+from .activity_tracker import tracker, ActivityType, track_activity
 
 
 def create_project(db: Session, name: str, description: str | None = None) -> models.Project:
-    project = models.Project(name=name, description=description)
-    db.add(project)
-    db.commit()
-    db.refresh(project)
-    # Initialize usage quota row (unlimited by default)
-    q = models.UsageQuota(project_id=project.id, max_runs_per_day=0, runs_today=0)
-    db.add(q)
-    db.commit()
-    return project
+    """Create a new project with activity tracking."""
+    with track_activity(
+        ActivityType.DECISION,
+        f"Create project: {name}",
+        f"Will create new project '{name}' with usage quota initialization"
+    ) as activity_id:
+        project = models.Project(name=name, description=description)
+        db.add(project)
+        db.commit()
+        db.refresh(project)
+        # Initialize usage quota row (unlimited by default)
+        q = models.UsageQuota(project_id=project.id, max_runs_per_day=0, runs_today=0)
+        db.add(q)
+        db.commit()
+        
+        tracker.complete_activity(
+            activity_id,
+            f"Successfully created project #{project.id}: {name}",
+            result={"project_id": project.id, "name": name}
+        )
+        return project
 
 
 def get_project(db: Session, project_id: int) -> models.Project | None:
@@ -36,6 +49,16 @@ def create_vision(db: Session, project: models.Project, content: str) -> models.
 
 
 def propose_requirements(db: Session, vision: models.Vision) -> models.RequirementsDraft:
+    """Propose requirements with decision tracking."""
+    activity_id = tracker.create_activity(
+        type=ActivityType.DECISION,
+        name="Propose Requirements",
+        what_it_will_do=f"Generate requirements draft for project '{vision.project.name}'",
+        context={"vision_id": vision.id, "project_name": vision.project.name}
+    )
+    
+    tracker.start_activity(activity_id, "Attempting to generate requirements using AI or fallback")
+    
     # Try OpenAI-backed planner if enabled, otherwise fall back to deterministic draft.
     body = propose_requirements_from_openai(vision.project.name, vision.content) or (
         f"Proposed Requirements for project '{vision.project.name}':\n"
@@ -44,10 +67,18 @@ def propose_requirements(db: Session, vision: models.Vision) -> models.Requireme
         f"- Non-Goals: items not in scope.\n"
         f"Vision Summary: {vision.content[:200]}"
     )
+    
     draft = models.RequirementsDraft(vision=vision, draft=body, status="proposed")
     db.add(draft)
     db.commit()
     db.refresh(draft)
+    
+    tracker.complete_activity(
+        activity_id,
+        f"Created requirements draft for project '{vision.project.name}'",
+        result={"draft_id": draft.id, "method": "AI" if "OpenAI" not in body[:50] else "fallback"}
+    )
+    
     return draft
 
 
@@ -84,18 +115,39 @@ def transition_work_item(db: Session, wi: models.WorkItem, new_state: str) -> mo
 
 
 def start_run(db: Session, wi: models.WorkItem) -> models.Run:
-    # simple agent stub: mark running and append a log line
-    tid = str(uuid.uuid4())
-    run = models.Run(work_item=wi, status="running", logs=f"Starting run... trace_id={tid}\n", trace_id=tid)
-    wi.state = "In Progress"
-    db.add(run)
-    db.add(wi)
-    db.commit()
-    db.refresh(run)
-    return run
+    """Start a run with comprehensive activity tracking."""
+    with track_activity(
+        ActivityType.WORK_ITEM,
+        f"Start run for: {wi.title}",
+        f"Will create and start execution run for work item #{wi.id}"
+    ) as activity_id:
+        # simple agent stub: mark running and append a log line
+        tid = str(uuid.uuid4())
+        run = models.Run(work_item=wi, status="running", logs=f"Starting run... trace_id={tid}\n", trace_id=tid)
+        wi.state = "In Progress"
+        db.add(run)
+        db.add(wi)
+        db.commit()
+        db.refresh(run)
+        
+        tracker.complete_activity(
+            activity_id,
+            f"Started run #{run.id} for work item '{wi.title}'",
+            result={"run_id": run.id, "work_item_id": wi.id, "trace_id": tid}
+        )
+        return run
 
 
 def complete_run(db: Session, run: models.Run, success: bool = True) -> models.Run:
+    """Complete a run with decision tracking for retry logic."""
+    activity_id = tracker.create_activity(
+        type=ActivityType.DECISION,
+        name=f"Complete run #{run.id}",
+        what_it_will_do=f"Will mark run as {'succeeded' if success else 'failed'} and handle retry logic"
+    )
+    
+    tracker.start_activity(activity_id, f"Completing run with status: {'success' if success else 'failure'}")
+    
     run.status = "succeeded" if success else "failed"
     run.logs = (run.logs or "") + ("Completed successfully.\n" if success else "Failed.\n")
     # mark finish time for duration metrics
@@ -107,11 +159,23 @@ def complete_run(db: Session, run: models.Run, success: bool = True) -> models.R
     db.add(wi)
     db.commit()
     db.refresh(run)
+    
+    retry_scheduled = False
     if not success and settings.max_retries > 0:
         failures = db.query(models.Run).filter_by(work_item_id=wi.id, status="failed").count()
         if failures <= settings.max_retries:
             base = getattr(settings, "backoff_base_seconds", 30)
             delay = base * (2 ** max(0, failures - 1))
+            
+            # Track retry decision
+            retry_activity = tracker.create_activity(
+                type=ActivityType.DECISION,
+                name="Schedule retry",
+                what_it_will_do=f"Schedule retry #{failures} with {delay}s delay",
+                parent_id=activity_id
+            )
+            tracker.start_activity(retry_activity, f"Scheduling retry with backoff delay of {delay} seconds")
+            
             # schedule retry with backoff
             st = models.ScheduledTask(
                 work_item_id=wi.id,
@@ -122,6 +186,20 @@ def complete_run(db: Session, run: models.Run, success: bool = True) -> models.R
             )
             db.add(st)
             db.commit()
+            retry_scheduled = True
+            
+            tracker.complete_activity(
+                retry_activity,
+                f"Scheduled retry #{failures} for work item #{wi.id}",
+                result={"retry_number": failures, "delay_seconds": delay}
+            )
+    
+    tracker.complete_activity(
+        activity_id,
+        f"Run #{run.id} completed as {'success' if success else 'failure'}" + 
+        (f", retry scheduled" if retry_scheduled else ""),
+        result={"run_id": run.id, "success": success, "retry_scheduled": retry_scheduled}
+    )
     
     return run
 
@@ -234,6 +312,15 @@ def try_consume_run(db: Session, project_id: int) -> tuple[bool, int]:
 
 
 def scheduler_tick(db: Session) -> int:
+    """Process scheduler queue with comprehensive activity tracking."""
+    activity_id = tracker.create_activity(
+        type=ActivityType.SCHEDULER_TICK,
+        name="Scheduler Tick",
+        what_it_will_do="Process queued work items and start eligible runs"
+    )
+    
+    tracker.start_activity(activity_id, "Querying for eligible scheduled tasks")
+    
     processed = 0
     # start runs for queued items due now with deps satisfied, highest priority first
     now = datetime.utcnow()
@@ -245,33 +332,60 @@ def scheduler_tick(db: Session) -> int:
         .all()
     )
     for st in queued:
+        # Track each task processing decision
+        task_activity = tracker.create_activity(
+            type=ActivityType.DECISION,
+            name=f"Process task #{st.id}",
+            what_it_will_do=f"Evaluate and potentially start work item #{st.work_item_id}",
+            parent_id=activity_id
+        )
+        tracker.start_activity(task_activity, "Checking dependencies and approvals")
+        
         dep_ok = True
         if st.depends_on_work_item_id:
             dep_wi = db.get(models.WorkItem, st.depends_on_work_item_id)
             dep_ok = dep_wi is not None and dep_wi.state == "Done"
         if not dep_ok:
+            tracker.complete_activity(task_activity, "Skipped: dependencies not satisfied")
             continue
 
         wi = db.get(models.WorkItem, st.work_item_id)
         if not wi:
             st.status = "done"
             db.add(st)
+            tracker.complete_activity(task_activity, "Work item not found, marking task as done")
             continue
         if settings.require_approval:
             latest = get_latest_approval(db, wi)
             if not latest or latest.status != "approved":
+                tracker.complete_activity(task_activity, "Skipped: approval required but not found")
                 continue
         # enforce per-project quota
         ok, _remaining = try_consume_run(db, wi.project_id)
         if not ok:
             # skip for now; leave queued to retry next tick
+            tracker.complete_activity(task_activity, "Skipped: quota exceeded")
             continue
         # start run
         run = start_run(db, wi)
         st.status = "running"
         db.add(st)
         processed += 1
+        
+        tracker.complete_activity(
+            task_activity,
+            f"Started run #{run.id} for work item '{wi.title}'",
+            result={"run_id": run.id, "work_item_id": wi.id}
+        )
+    
     db.commit()
+    
+    tracker.complete_activity(
+        activity_id,
+        f"Processed {processed} scheduled tasks",
+        result={"processed_count": processed, "queued_count": len(queued)}
+    )
+    
     return processed
 
 

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from typing import Optional
+import logging
 
 from .config import settings
+from .activity_tracker import tracker, ActivityType, track_decision
+
+logger = logging.getLogger(__name__)
 
 
 OPENAI_PROMPT = (
@@ -29,12 +33,24 @@ def _try_import_openai():
             return None
 
 
+@track_decision("Generate requirements using OpenAI for project planning")
 def propose_requirements_from_openai(project_name: str, vision_text: str) -> Optional[str]:
     """
     If enabled and properly configured, call OpenAI to generate a requirements draft.
     Returns None on any failure so callers can fall back to deterministic draft.
     """
+    # Track the decision to use OpenAI
+    activity_id = tracker.create_activity(
+        type=ActivityType.AI_INFERENCE,
+        name="OpenAI Requirements Generation",
+        what_it_will_do=f"Generate requirements for project '{project_name}' using GPT model",
+        context={"project_name": project_name, "vision_length": len(vision_text)}
+    )
+    
+    tracker.start_activity(activity_id, "Checking OpenAI configuration and availability")
+    
     if not settings.enable_openai_planner:
+        tracker.complete_activity(activity_id, "OpenAI planner is disabled in settings")
         return None
 
     api_key = __import__("os").getenv("OPENAI_API_KEY")

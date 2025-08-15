@@ -4,6 +4,8 @@ import time
 import shlex
 import subprocess
 from typing import List, Optional, Union
+import sys
+import logging
 
 import requests
 import yaml
@@ -11,6 +13,21 @@ import shutil
 import json
 import threading
 import uuid
+
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+try:
+    from orchestrator.orchestrator.activity_tracker import (
+        tracker, ActivityType, ThreadTracker, track_thread, track_activity
+    )
+    TRACKING_ENABLED = True
+except ImportError:
+    TRACKING_ENABLED = False
+    print("Warning: Activity tracking not available")
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 BASE_URL = os.getenv("ORCH_URL", "http://localhost:18080")
@@ -28,11 +45,35 @@ MOCK_CODEX = os.getenv("AGENT_MOCK_CODEX", "false").lower() in ("1", "true", "ye
 
 
 def tick() -> int:
+    """Process scheduler tick with activity tracking."""
+    if TRACKING_ENABLED:
+        activity_id = tracker.create_activity(
+            type=ActivityType.AGENT_ACTION,
+            name="Scheduler Tick",
+            what_it_will_do="Process pending work items from scheduler queue"
+        )
+        tracker.start_activity(activity_id, "Sending tick request to scheduler")
+    
     try:
         r = requests.post(f"{BASE_URL}/scheduler/tick")
         r.raise_for_status()
-        return r.json().get("processed", 0)
-    except Exception:
+        processed = r.json().get("processed", 0)
+        
+        if TRACKING_ENABLED:
+            tracker.complete_activity(
+                activity_id,
+                f"Processed {processed} items from scheduler queue",
+                result={"processed_count": processed}
+            )
+        
+        if processed > 0:
+            logger.info(f"Scheduler tick processed {processed} items")
+        
+        return processed
+    except Exception as e:
+        if TRACKING_ENABLED:
+            tracker.fail_activity(activity_id, str(e))
+        logger.error(f"Scheduler tick failed: {e}")
         return 0
 
 

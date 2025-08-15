@@ -4,10 +4,14 @@ from fastapi.responses import Response as FastAPIResponse
 from base64 import b64decode
 import json as _json
 from sqlalchemy.orm import Session
+import logging
 
 from ..db import SessionLocal, Base, engine
 from .. import schemas, crud
 from ..config import settings
+from ..activity_tracker import tracker, ActivityType, track_activity
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter()
@@ -24,7 +28,25 @@ def get_db():
 
 @router.post("/", response_model=schemas.WorkItemOut, status_code=201, summary="Create work item")
 def create_work_item(payload: schemas.WorkItemCreate, db: Session = Depends(get_db)):
-    return crud.create_work_item(db, project_id=payload.project_id, title=payload.title, description=payload.description)
+    """Create a new work item with activity tracking."""
+    with track_activity(
+        ActivityType.WORK_ITEM, 
+        f"Create work item: {payload.title}",
+        f"Will create work item '{payload.title}' for project {payload.project_id}"
+    ) as activity_id:
+        result = crud.create_work_item(
+            db, 
+            project_id=payload.project_id, 
+            title=payload.title, 
+            description=payload.description
+        )
+        tracker.complete_activity(
+            activity_id,
+            f"Created work item #{result.id}: {result.title}",
+            result={"work_item_id": result.id, "title": result.title}
+        )
+        logger.info(f"Work item created: #{result.id} - {result.title}")
+        return result
 
 
 @router.post(
@@ -34,14 +56,46 @@ def create_work_item(payload: schemas.WorkItemCreate, db: Session = Depends(get_
     summary="Start a run for a work item",
 )
 def start_run(wi_id: int, db: Session = Depends(get_db)):
-    wi = crud.get_work_item(db, wi_id)
-    if not wi:
-        raise HTTPException(status_code=404, detail="Work item not found")
-    if settings.require_approval:
-        latest = crud.get_latest_approval(db, wi)
-        if not latest or latest.status != "approved":
-            raise HTTPException(status_code=403, detail="Approval required before starting run")
-    return crud.start_run(db, wi)
+    """Start a run for a work item with comprehensive tracking."""
+    activity_id = tracker.create_activity(
+        type=ActivityType.WORK_ITEM,
+        name=f"Start run for work item #{wi_id}",
+        what_it_will_do=f"Will validate work item, check approvals, and start execution run"
+    )
+    
+    tracker.start_activity(activity_id, f"Validating work item #{wi_id}")
+    
+    try:
+        wi = crud.get_work_item(db, wi_id)
+        if not wi:
+            tracker.fail_activity(activity_id, f"Work item #{wi_id} not found")
+            raise HTTPException(status_code=404, detail="Work item not found")
+        
+        tracker.start_activity(activity_id, f"Checking approval requirements for '{wi.title}'")
+        
+        if settings.require_approval:
+            latest = crud.get_latest_approval(db, wi)
+            if not latest or latest.status != "approved":
+                tracker.fail_activity(activity_id, "Approval required but not found")
+                raise HTTPException(status_code=403, detail="Approval required before starting run")
+        
+        tracker.start_activity(activity_id, f"Starting execution run for '{wi.title}'")
+        run = crud.start_run(db, wi)
+        
+        tracker.complete_activity(
+            activity_id,
+            f"Successfully started run #{run.id} for work item '{wi.title}'",
+            result={"run_id": run.id, "work_item_id": wi_id, "status": run.status}
+        )
+        
+        logger.info(f"Run #{run.id} started for work item #{wi_id}")
+        return run
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        tracker.fail_activity(activity_id, str(e))
+        raise
 
 
 @router.post(
